@@ -16,4 +16,4 @@ Base On "NEXUS AS A CODE" (https://developer.cisco.com/docs/nexus-as-code/introd
 
 # You can use this method to all kind of firewalls like sophos, fortigate, palo alto, firepower and ... . you want to customize it base on your kind.
 
-# If you want you can use gitlab for CI/CD pipeline.
+If you want you can use gitlab for CI/CD pipeline.
