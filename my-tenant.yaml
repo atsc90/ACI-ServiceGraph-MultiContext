@@ -1,0 +1,303 @@
+---
+apic:
+  # Tenant >> All Tenants
+  tenants:
+    - name: my-tenant
+
+      # Tenant >> (your tenant) >> (your tenant) >> Networking >> VRFs
+      vrfs:
+        - name: my-vrf
+          enforcement_preference: enforced
+          contracts:
+            providers:
+              - 1810_TO_1811_contract
+              - 1811_TO_1810_contract
+
+      # Tenant >> (your tenant) >> (your tenant) >> Networking >> Bridge Domains
+      bridge_domains:
+        - name: my-BD-1810
+          vrf: my-vrf
+          unknown_unicast: proxy
+          unicast_routing: true
+          subnets:
+            - ip: 10.35.10.254/24
+        - name: my-BD-1811
+          vrf: my-vrf
+          unknown_unicast: proxy
+          unicast_routing: true
+          subnets:
+            - ip: 10.35.11.254/24
+
+      # Tenant >> (your tenant) >> (your tenant) >> Application Profiles
+      application_profiles:
+        - name: my-APP
+
+          # Tenant >> (your tenant) >> (your tenant) >> Application Profiles >> (your application profile) >> Application EPGs
+          endpoint_groups:
+            - name: my-EPG-1810
+              bridge_domain: my-BD-1810
+
+              # Tenant >> (your tenant) >> (your tenant) >> Application Profiles >> (your application profile) >> Application EPGs >> (your application epg) >> Domains (VMs and Bare-Metals)
+              physical_domains:
+                  - my-physical-domain
+
+              # Tenant >> (your tenant) >> (your tenant) >> Application Profiles >> (your application profile) >> Application EPGs >> (your application epg) >> Static Ports    
+              static_ports:
+                  # - channel: VPC_FTD2130_1
+                  #   node_id: 1213
+                  #   node2_id: 1223
+                  #   vlan: 1810
+                  - channel: VPC_FTD2130_2
+                    node_id: 1213
+                    node2_id: 1223
+                    vlan: 1810
+              
+              # Tenant >> (your tenant) >> (your tenant) >> Application Profiles >> (your application profile) >> Application EPGs >> (your application epg) >> Contracts
+              contracts:
+                consumers:
+                  - 1810_TO_1811_contract
+
+            - name: my-EPG-1811
+              bridge_domain: my-BD-1811
+              physical_domains:
+                  - my-physical-domain
+              static_ports:
+                  # - channel: VPC_FTD2130_1
+                  #   node_id: 1213
+                  #   node2_id: 1223
+                  #   vlan: 1811
+                  - channel: VPC_FTD2130_2
+                    node_id: 1213
+                    node2_id: 1223
+                    vlan: 1811
+              contracts:
+                consumers:
+                  - 1811_TO_1810_contract
+
+      # Tenant >> (your tenant) >> (your tenant) >> Contracts >> Filters 
+      filters:
+        - name: 1810_TO_1811_filter
+          entries:
+            - name: my-ssh
+              ethertype: ip
+              protocol: icmp
+              # destination_from_port: 22
+              # destination_to_port: 22
+              stateful: true
+
+      # Tenant >> (your tenant) >> (your tenant) >> Contracts >> Standard
+      contracts:
+        - name: 1810_TO_1811_contract
+          subjects: 
+            - name: 1810_TO_1811_subject
+              service_graph: my_service_graph_template
+              filters:
+                - filter: 1810_TO_1811_filter
+                  action: permit
+        - name: 1811_TO_1810_contract
+          subjects: 
+            - name: 1811_TO_1810_subject
+              service_graph: my_service_graph_template_1811
+              filters:
+                - filter: 1810_TO_1811_filter
+                  action: permit
+      
+      # Tenant >> (your tenant) >> (your tenant) >> Services >> L4-L7 >> Devices
+      services:
+        l4l7_devices:
+          - name: my-l4l7-service-device
+            context_aware: single-Context
+            type: PHYSICAL
+            function: GoTo
+            service_type: FW
+            physical_domain: my-physical-domain
+            concrete_devices:
+              - name: FTD-01
+                interfaces:
+                  - name: VPC-FTD01
+                    channel: VPC_FTD2130_1
+                    node_id: 1213
+                    node2_id: 1223
+            logical_interfaces:
+              # It is Provider in this scenario
+              - name: INSIDE-1810
+                vlan: 1812
+                concrete_interfaces:
+                  - device: FTD-01
+                    interface_name: VPC-FTD01
+              - name: INSIDE-1811
+                vlan: 1813
+                concrete_interfaces:
+                  - device: FTD-01
+                    interface_name: VPC-FTD01
+
+        # Tenant >> (your tenant) >> (your tenant) >> Policies >> Protocol >> L4-L7 Policy-Based Redirect
+        redirect_policies:
+          - name: PBR-1812
+            type: L3
+            hashing: sip-dip-prototype
+            resilient_hashing: false
+            l3_destinations:
+              - name: 1812-dest
+                ip: 10.35.10.12
+                mac: 00:22:BD:F8:19:FE
+                pod: 1
+          - name: PBR-1813
+            type: L3
+            hashing: sip-dip-prototype
+            resilient_hashing: false
+            l3_destinations:
+              - name: 1813-dest
+                ip: 10.35.11.12
+                mac: 00:22:BD:F8:19:FE
+                pod: 1
+        
+        # Tenant >> (your tenant) >> (your tenant) >> Services >> L4-L7 >> Service Graph Template
+        service_graph_templates:
+          - name: my_service_graph_template
+            template_type: FW_ROUTED
+            # template_type: ADC_ONE_ARM
+            redirect: true
+            # Filters After First Node (is not available)
+            device:
+              tenant: my-tenant
+              name: my-l4l7-service-device
+              node_name: N1
+            # To permit traffic from the provider EPG, Direct Connect option must be enabled (and vice versa)
+            consumer:
+              direct_connect: false
+            provider:
+              direct_connect: true
+          - name: my_service_graph_template_1811
+            template_type: FW_ROUTED
+            # template_type: ADC_ONE_ARM
+            redirect: true
+            # Filters After First Node (is not available)
+            device:
+              tenant: my-tenant
+              name: my-l4l7-service-device
+              node_name: N1
+            # To permit traffic from the provider EPG, Direct Connect option must be enabled (and vice versa)
+            consumer:
+              direct_connect: false
+            provider:
+              direct_connect: true
+        
+        # Tenant >> (your tenant) >> (your tenant) >> Services >> L4-L7 >> Device Selection Policies
+        device_selection_policies:
+          - contract: 1810_TO_1811_contract
+            service_graph_template: my_service_graph_template
+            provider:
+              l3_destination: true
+              redirect_policy:
+                name: PBR-1812
+              logical_interface: INSIDE-1810
+              bridge_domain: 
+                name: my-BD-1810
+                # service_epg_policy: my-EPG-1812
+            consumer:
+              l3_destination: true
+              # redirect_policy:
+              #   name: PBR-1812
+              logical_interface: INSIDE-1810
+              bridge_domain: 
+                name: my-BD-1810
+                # service_epg_policy: my-EPG-1813
+          - contract: 1811_TO_1810_contract
+            service_graph_template: my_service_graph_template_1811
+            provider:
+              l3_destination: true
+              redirect_policy:
+                name: PBR-1813
+              logical_interface: INSIDE-1811
+              bridge_domain: 
+                name: my-BD-1811
+                # service_epg_policy: my-EPG-1812
+            consumer:
+              l3_destination: true
+              # redirect_policy:
+              #   name: PBR-1813
+              logical_interface: INSIDE-1811
+              bridge_domain: 
+                name: my-BD-1811
+                # service_epg_policy: my-EPG-1813
+
+    - name: inter-tenant
+
+      vrfs:
+        - name: inter-vrf
+          enforcement_preference: enforced
+
+      application_profiles:
+        - name: inter-APP
+      
+      # Tenant >> (your tenant) >> (your tenant) >> Networking >> L3Outs
+      l3outs:
+        - name: inter-l3out
+          vrf: inter-vrf
+          domain: my-l3-domain
+          node_profiles:
+            - name: inter-node-profile
+              nodes:
+                - node_id: 1213
+                  router_id: 12.12.13.13
+                  router_id_as_loopback: true
+                  static_routes:
+                    - prefix: 10.35.11.0/24
+                      preference: 1
+                      next_hops:
+                        - ip: 10.35.10.254
+                    - prefix: 10.35.10.0/24
+                      preference: 1
+                      next_hops:
+                        - ip: 10.35.11.254
+                - node_id: 1223
+                  router_id: 12.12.23.23
+                  router_id_as_loopback: true
+                  static_routes:
+                    - prefix: 10.35.11.0/24
+                      preference: 1
+                      next_hops:
+                        - ip: 10.35.10.254
+                    - prefix: 10.35.10.0/24
+                      preference: 1
+                      next_hops:
+                        - ip: 10.35.11.254
+              interface_profiles:
+                - name: inter-interface-profile-1810
+                  interfaces:
+                    - channel: VPC_FTD2130_1
+                      node_id: 1213
+                      node2_id: 1223
+                      scope: vrf
+                      autostate: true
+                      mode: regular
+                      svi: true
+                      # Because you have 2 tenants in 1 pod, you have to change the mac address (its because of ARP in FTD)
+                      mac: 00:22:BD:F8:19:FE
+                      vlan: 1814
+                      ip_a: 10.35.10.10/24
+                      ip_b: 10.35.10.11/24
+                      ip_shared: 10.35.10.12/24
+                - name: inter-interface-profile-1811
+                  interfaces:
+                    - channel: VPC_FTD2130_1
+                      node_id: 1213
+                      node2_id: 1223
+                      scope: vrf
+                      autostate: true
+                      mode: regular
+                      svi: true
+                      mac: 00:22:BD:F8:19:FE
+                      vlan: 1815
+                      ip_a: 10.35.11.10/24
+                      ip_b: 10.35.11.11/24
+                      ip_shared: 10.35.11.12/24
+                    
+          external_endpoint_groups:
+            - name: l3out-external-EPG
+              # For classification, is so important
+              subnets:
+                - name: ALL
+                  prefix: 0.0.0.0/0
+                  import_security: true
